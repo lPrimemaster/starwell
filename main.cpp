@@ -1,15 +1,22 @@
 // This is a very simple attempt to start some simulation code using the Barnes-Hut algorithm for n-body interactions
 // It features a O(n log n) complexity
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
+#include <new>
 #include <random>
 #include <vector>
 #include <cmath>
 #include <iostream>
 
-struct Vector3
+#include <stperf.h>
+#include <glad/gl.h>
+#include <glfw3.h>
+
+struct PVector3
 {
     union
     {
@@ -22,22 +29,22 @@ struct Vector3
         float data[3];
     };
     
-    static float DistanceSqr(const Vector3& a, const Vector3& b)
+    static float DistanceSqr(const PVector3& a, const PVector3& b)
     {
         return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z); 
     }
 
-    static float Distance(const Vector3& a, const Vector3& b)
+    static float Distance(const PVector3& a, const PVector3& b)
     {
         return std::sqrt(DistanceSqr(a, b));
     }
 
-    static float Magnitude(const Vector3& v)
+    static float Magnitude(const PVector3& v)
     {
         return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
     }
 
-    Vector3& operator+=(const Vector3& a)
+    PVector3& operator+=(const PVector3& a)
     {
         this->x += a.x;
         this->y += a.y;
@@ -45,35 +52,35 @@ struct Vector3
         return *this;
     }
 
-    static Vector3 Normalize(const Vector3& v);
+    static PVector3 Normalize(const PVector3& v);
 };
 
-Vector3 operator*(float s, const Vector3& v)
+PVector3 operator*(float s, const PVector3& v)
 {
-    return Vector3 { s * v.x, s * v.y, s * v.z };
+    return PVector3 { s * v.x, s * v.y, s * v.z };
 }
 
-Vector3 operator/(const Vector3& v, float s)
+PVector3 operator/(const PVector3& v, float s)
 {
-    return Vector3 { v.x / s, v.y / s, v.z / s };
+    return PVector3 { v.x / s, v.y / s, v.z / s };
 }
 
-Vector3 operator+(const Vector3& a, const Vector3& b)
+PVector3 operator+(const PVector3& a, const PVector3& b)
 {
     return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
-Vector3 operator-(const Vector3& a, const Vector3& b)
+PVector3 operator-(const PVector3& a, const PVector3& b)
 {
     return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
-Vector3 Vector3::Normalize(const Vector3& v)
+PVector3 PVector3::Normalize(const PVector3& v)
 {
     return v / Magnitude(v);
 }
 
-std::ostream& operator<<(std::ostream& cout, const Vector3& v)
+std::ostream& operator<<(std::ostream& cout, const PVector3& v)
 {
     cout << "[" << v.x << " " << v.y << " " << v.z << "]";
     return cout;
@@ -83,7 +90,7 @@ std::ostream& operator<<(std::ostream& cout, const Vector3& v)
 class Body
 {
 public:
-    Body(const Vector3& position, const Vector3& velocity = {0, 0, 0}) : position(position), velocity(velocity), mass(1.0f)
+    Body(const PVector3& position, const PVector3& velocity = {0, 0, 0}) : position(position), velocity(velocity), mass(1.0f)
     {
         
     }
@@ -92,9 +99,9 @@ public:
     Body(Body&& body) = default;
     ~Body() = default;
 
-    void move(const Vector3& field)
+    void move(const PVector3& field)
     {
-        Vector3 force = field;
+        PVector3 force = field;
         velocity += 0.01f * 2 * force;
         position += 0.01f * velocity;
     }
@@ -104,29 +111,88 @@ public:
         return mass;
     }
 
-    Vector3 getPosition() const
+    PVector3 getPosition() const
     {
         return position;
     }
 
 private:
-    Vector3 position;
-    Vector3 velocity;
+    PVector3 position;
+    PVector3 velocity;
     float mass;
+};
+
+template<typename T>
+class BHPool
+{
+public:
+    BHPool(std::size_t maxInstances) : N(maxInstances)
+    {
+        buffer = new unsigned char[sizeof(T) * N];
+        state = new bool[N]{ false };
+    }
+
+    ~BHPool() { if(buffer) delete[] buffer; }
+
+    void* alloc()
+    {
+        for(std::size_t i = 0; i < N; i++)
+        {
+            if(!state[i])
+            {
+                state[i] = true;
+                return &buffer[sizeof(T) * i];
+            }
+        }
+        throw std::bad_alloc();
+    }
+
+    void free(void* p)
+    {
+        for(std::size_t i = 0; i < N; i++)
+        {
+            if(&buffer[sizeof(T) * i] == p)
+            {
+                state[i] = false;
+                return;
+            }
+        }
+    }
+
+private:
+    unsigned char* buffer = nullptr;
+    bool* state = nullptr;
+    const std::size_t N;
 };
 
 struct BHNode
 {
     std::array<BHNode*, 8> children = { nullptr };
     std::vector<const Body*> bodies;
-    Vector3 centerOfMassNorm = {0.0f, 0.0f, 0.0f};
-    Vector3 centerOfMassWeighted = {0.0f, 0.0f, 0.0f};
+    PVector3 centerOfMassNorm = {0.0f, 0.0f, 0.0f};
+    PVector3 centerOfMassWeighted = {0.0f, 0.0f, 0.0f};
+    PVector3 geometricCenter = {0.0f, 0.0f, 0.0f};
     float mass = 0.0f;
-    Vector3 nodeCenter = {0.0f, 0.0f, 0.0f};
-    float nodeSize = 100.0f;
+    PVector3 nodeCenter = {0.0f, 0.0f, 0.0f};
+    float nodeSize = 1E12f;
     static constexpr float BHNODE_SIZE = 1.0f;
     static constexpr float BHNODE_FIELD_EPSILON_THR = 1E-8f;
+    static constexpr int BHNODE_MAX_DEPTH = 10000;
+
+    // static BHPool<BHNode> MemoryPool;
+    
+    // void* operator new(std::size_t n)
+    // {
+    //     return MemoryPool.alloc();
+    // }
+    //
+    // void operator delete(void* p)
+    // {
+    //     MemoryPool.free(p);
+    // }
 };
+
+// BHPool<BHNode> BHNode::MemoryPool(10000);
 
 // The BHTree is centered on the origin
 class BHTree
@@ -151,22 +217,44 @@ public:
 
     void insertBody(const Body* body)
     {
-        calculateNodeInsertion(body, root);
+        ST_PROF;
+        calculateNodeInsertion(body, root, 0);
     }
     
-    Vector3 calculateFieldOnPoint(const Vector3& point, const float thr)
+    PVector3 calculateFieldOnPoint(const PVector3& point, const float thr)
     {
+        ST_PROF;
         // Traverse the tree with dfs and use a threshold of thr
         return calculateFieldOnPointDFS(point, thr, root);
     }
 
-    void printNodes()
+    void printNodes() const
     {
         printNode(root, 0);
     }
 
+    unsigned long long computeNodeNumber() const
+    {
+        return countChildrenRecursive(root);
+    }
+
 private:
-    void printNode(const BHNode* node, int depth)
+    unsigned long long countChildrenRecursive(BHNode* node) const
+    {
+        unsigned long long count = 1ULL;
+
+        for(std::size_t i = 0; i < node->children.size(); i++)
+        {
+            if(node->children[i])
+            {
+                count += countChildrenRecursive(node->children[i]);
+            }
+        }
+
+        return count;
+    }
+
+    void printNode(const BHNode* node, int depth) const
     {
         for(int i = 0; i < depth; i++) std::cout << "\t";
 
@@ -181,27 +269,25 @@ private:
         for(int i = 0; i < depth + 1; i++) std::cout << "\t";
         std::cout << "- Center of Mass : " << node->centerOfMassNorm << std::endl;
 
-        if(node->children[0])
-            for(int i = 0; i < 8; i++) printNode(node->children[i], depth + 1);
+        for(int i = 0; i < depth + 1; i++) std::cout << "\t";
+        std::cout << "- Child Count    : " << std::count_if(node->children.begin(), node->children.end(), [](auto* child) { return child != nullptr; }) << std::endl;
+
+        for(int i = 0; i < 8; i++) if(node->children[i]) printNode(node->children[i], depth + 1);
     }
 
     void deleteNodes(BHNode* node)
     {
-        if(!node) return;
-        if(node->children[0])
+        for(std::size_t i = 0; i < 8; i++)
         {
-            for(std::size_t i = 0; i < 8; i++)
-            {
-                deleteNodes(node->children[i]);
-            }
+            if(node->children[i]) deleteNodes(node->children[i]);
         }
         delete node;
     }
 
-    Vector3 calculateFieldOnPointDFS(const Vector3& point, const float thr, const BHNode* node)
+    PVector3 calculateFieldOnPointDFS(const PVector3& point, const float thr, const BHNode* node)
     {
-        Vector3 field = {0.0f, 0.0f, 0.0f};
-        constexpr float K = 0.1f;
+        PVector3 field = {0.0f, 0.0f, 0.0f};
+        constexpr float K = 30.0f;
 
         if(node->bodies.empty())
         {
@@ -210,7 +296,7 @@ private:
 
         // Check thr
         // TODO: (César) : Change to DistanceSqr
-        float distance = Vector3::Distance(point, node->centerOfMassNorm);
+        float distance = PVector3::Distance(point, node->centerOfMassNorm);
 
         // Exclude self (for now just use this distance approach)
         // There might be better ways
@@ -223,75 +309,69 @@ private:
 
         if(useCM)
         {
-            field = (K * node->mass / distance) * Vector3::Normalize(node->centerOfMassNorm - point);
-            // std::cout << "Norm: " << Vector3::Normalize(node->centerOfMassNorm - point) << std::endl;
+            // field = (K * node->mass / (distance * distance)) * Vector3::Normalize(node->centerOfMassNorm - point);
+            field = (K * node->mass / distance) * PVector3::Normalize(node->centerOfMassNorm - point);
         }
         else
         {
             // Continue the traversal
             for(std::size_t i = 0; i < 8; i++)
             {
+                if(!node->children[i]) continue;
+
                 field += calculateFieldOnPointDFS(point, thr, node->children[i]);
             }
         }
-        // std::cout << "Field: " << field << std::endl;
         return field;
     }
 
-    void calculateNodeInsertion(const Body* body, BHNode* node)
+    void calculateNodeInsertion(const Body* body, BHNode* node, unsigned long long depth)
     {
-        // node->bodies.push_back(&body);
-        // node->mass += body.getMass();
-
         if(node->bodies.empty())
         {
             node->bodies.push_back(body);
             node->mass += body->getMass();
             node->centerOfMassWeighted = body->getPosition();
             node->centerOfMassNorm = node->centerOfMassWeighted;
+            node->geometricCenter = body->getPosition();
             return;
         }
-        const Vector3& bposition = body->getPosition();
+        const PVector3& bposition = body->getPosition();
+        node->geometricCenter += (bposition - node->geometricCenter) / (node->bodies.size() + 1);
         node->centerOfMassWeighted += body->getMass() * bposition;
         node->mass += body->getMass();
         node->centerOfMassNorm = node->centerOfMassWeighted / node->mass;
 
         node->bodies.push_back(body);
-
-        // Do we not have children ?
-        if(!node->children[0])
+        
+        std::size_t cindex = calculateNodeIndex(bposition, node);
+        if(!node->children[cindex])
         {
-            spawnChildren(node);
+            spawnChildren(node, depth);
         }
         else
         {
-            std::size_t cindex = calculateNodeIndex(bposition, node);
-            calculateNodeInsertion(body, node->children[cindex]);
+            calculateNodeInsertion(body, node->children[cindex], depth + 1);
         }
-
-        // node->bodies.push_back(&body);
-        
-        // Were does this new body fall ?
-        // std::size_t cindex = calculateNodeIndex(bposition, node);
-        // calculateNodeInsertion(body, node->children[cindex]);
     }
 
-    Vector3 calculateNodeCenter(const std::size_t nodeIndex, const BHNode* parent)
+    PVector3 calculateNodeCenter(const std::size_t nodeIndex, const BHNode* parent)
     {
-        constexpr std::array<Vector3, 8> offsets = {
-            Vector3{ -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
-            Vector3{ -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
-            Vector3{ -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
-            Vector3{ -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
-            Vector3{  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
-            Vector3{  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
-            Vector3{  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
-            Vector3{  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE }
+        constexpr std::array<PVector3, 8> offsets = {
+            PVector3{ -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
+            PVector3{ -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
+            PVector3{ -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
+            PVector3{ -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
+            PVector3{  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
+            PVector3{  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE },
+            PVector3{  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE, -BHNode::BHNODE_SIZE },
+            PVector3{  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE,  BHNode::BHNODE_SIZE }
         };
+        // return parent->geometricCenter + 0.25f * parent->nodeSize * offsets[nodeIndex];
         return parent->nodeCenter + 0.25f * parent->nodeSize * offsets[nodeIndex];
     }
 
-    std::size_t calculateNodeIndex(const Vector3& position, const BHNode* node)
+    std::size_t calculateNodeIndex(const PVector3& position, const BHNode* node)
     {
         std::size_t index = 0;
         index |= static_cast<std::size_t>(position.x >= node->nodeCenter.x) << 2;
@@ -300,23 +380,24 @@ private:
         return index;
     }
 
-    void spawnChildren(BHNode* parent)
+    void spawnChildren(BHNode* parent, int depth)
     {
-        for(std::size_t i = 0; i < parent->children.size(); i++)
-        {
-            parent->children[i] = new BHNode();
-            parent->children[i]->nodeCenter = calculateNodeCenter(i, parent);
-            parent->children[i]->nodeSize = 0.5f * parent->nodeSize;
-        }
-
+        std::array<bool, 8> needRecalculation = { false };
         for(const Body* body : parent->bodies)
         {
             std::size_t cindex = calculateNodeIndex(body->getPosition(), parent);
-            calculateNodeInsertion(body, parent->children[cindex]);
-            // parent->children[cindex]->bodies.push_back(body);
-            // parent->children[cindex]->mass += body->getMass();
-            // parent->children[cindex]->centerOfMassWeighted += body->getMass() * body->getPosition();
-            // parent->children[cindex]->centerOfMassNorm = parent->children[cindex]->centerOfMassWeighted / parent->children[cindex]->mass;
+            if(!parent->children[cindex])
+            {
+                needRecalculation[cindex] = true;
+                parent->children[cindex] = new BHNode();
+                parent->children[cindex]->nodeCenter = calculateNodeCenter(cindex, parent);
+                parent->children[cindex]->nodeSize = 0.5f * parent->nodeSize;
+            }
+
+            if(needRecalculation[cindex])
+            {
+                calculateNodeInsertion(body, parent->children[cindex], depth + 1);
+            }
         }
     }
 
@@ -324,74 +405,166 @@ private:
     BHNode* root;
 };
 
+class RenderWindow
+{
+public:
+    RenderWindow(const std::string& name, bool maximized = true) : glfwOK(false), window(nullptr), width(1920), height(1080)
+    {
+        if(!glfwInit())
+        {
+            std::cerr << "Failed to init glfw." << std::endl;
+            return;
+        }
+
+        glfwOK = true;
+
+        glfwSetErrorCallback([](int error, const char* msg) {
+            std::cerr << "glfw Error : " << error << " - " << msg << std::endl;
+        });
+
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+
+        window = glfwCreateWindow(width, height, name.c_str(), nullptr, nullptr);
+
+        if(!window)
+        {
+            std::cerr << "Failed to create window." << std::endl;
+            return;
+        }
+
+        glfwMakeContextCurrent(window);
+        gladLoadGL(glfwGetProcAddress);
+        glfwSwapInterval(1);
+
+        if(maximized)
+        {
+            glfwMaximizeWindow(window);
+        }
+    }
+
+    RenderWindow(const RenderWindow& window) = delete;
+    RenderWindow(RenderWindow&& window) = delete;
+
+    ~RenderWindow()
+    {
+        if(window)
+        {
+            glfwDestroyWindow(window);
+        }
+
+        if(glfwOK)
+        {
+            glfwTerminate();
+        }
+    }
+
+    bool initOK() const
+    {
+        return (window != nullptr) && glfwOK;
+    }
+
+    bool windowOpen() const
+    {
+        return !glfwWindowShouldClose(window);
+    }
+
+    void render()
+    {
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+private:
+    bool glfwOK;
+    GLFWwindow* window;
+    int width;
+    int height;
+};
+
 int main(void)
 {
+    RenderWindow rwindow("starwell v0.1");
+    
+    if(rwindow.initOK())
+    {
+        while(rwindow.windowOpen())
+        {
+            rwindow.render();
+        }
+    }
+
     std::vector<Body> bodies;
     BHTree tree;
 
-    // std::random_device dev;
-    // std::mt19937 mt(dev());
-    // std::normal_distribution<float> distX(-20.0f, 5.0f);
-    // std::normal_distribution<float> distY(0.0f, 0.1f);
-    // std::normal_distribution<float> distZ(0.0f, 5.0f);
-    //
-    // for(int i = 0 ; i < 1'000; i++)
-    // {
-    //     bodies.push_back(Body({
-    //         distX(mt),
-    //         distY(mt),
-    //         distZ(mt)
-    //     }, {0.0f, 50.0f, 0.0f}));
-    // }
-    //
-    // std::normal_distribution<float> distX1(20.0f, 5.0f);
-    // std::normal_distribution<float> distY1(0.0f, 0.1f);
-    // std::normal_distribution<float> distZ1(0.0f, 5.0f);
-    //
-    // for(int i = 0 ; i < 1'000; i++)
-    // {
-    //     bodies.push_back(Body({
-    //         distX1(mt),
-    //         distY1(mt),
-    //         distZ1(mt)
-    //     }, {0.0f, -50.0f, 0.0f}));
-    // }
-    
-    for(int i = 0; i < 10; i++)
+    std::random_device dev;
+    std::mt19937 mt(dev());
+    std::normal_distribution<float> distX(-20.0f, 5.0f);
+    std::normal_distribution<float> distY(0.0f, 0.1f);
+    std::normal_distribution<float> distZ(0.0f, 5.0f);
+
+    for(int i = 0 ; i < 1000; i++)
     {
-        for(int j = 0; j < 10; j++)
-        {
-            for(int k = 0; k < 10; k++)
-            {
-                float x = (i / 10.0f) * 100.0f - 50.0f;
-                float y = (j / 10.0f) * 100.0f - 50.0f;
-                float z = (k / 10.0f) * 100.0f - 50.0f;
-                bodies.push_back(Body({x, y, z}));
-            }
-        }
+        bodies.push_back(Body({
+            distX(mt),
+            distY(mt),
+            distZ(mt)
+        }, {0.0f, 50.0f, 0.0f}));
     }
+
+    std::normal_distribution<float> distX1(20.0f, 5.0f);
+    std::normal_distribution<float> distY1(0.0f, 0.1f);
+    std::normal_distribution<float> distZ1(0.0f, 5.0f);
+
+    for(int i = 0 ; i < 1000; i++)
+    {
+        bodies.push_back(Body({
+            distX1(mt),
+            distY1(mt),
+            distZ1(mt)
+        }, {0.0f, -50.0f, 0.0f}));
+    }
+    
+    // for(int i = 0; i < 10; i++)
+    // {
+    //     for(int j = 0; j < 10; j++)
+    //     {
+    //         for(int k = 0; k < 10; k++)
+    //         {
+    //             float x = (i / 10.0f) * 100.0f - 50.0f;
+    //             float y = (j / 10.0f) * 100.0f - 50.0f;
+    //             float z = (k / 10.0f) * 100.0f - 50.0f;
+    //             bodies.push_back(Body({x, y, z}));
+    //         }
+    //     }
+    // }
 
     std::ofstream file("output.csv");
     file << "x, y, z, frame\n";
     
-    for(int i = 0; i < 10'000; i++)
+    for(int i = 0; i < 100; i++)
     {
         for(auto& body : bodies)
         {
             tree.insertBody(&body);
-            Vector3 pos = body.getPosition();
+            PVector3 pos = body.getPosition();
             file << pos.x << "," << pos.y << "," << pos.z << "," << i << "\n";
         }
 
+        // tree.printNodes();
+        // std::cout << tree.computeNodeNumber() << std::endl;
+        // if(i == 0) break; 
         for(auto& body : bodies)
         {
-            Vector3 field = tree.calculateFieldOnPoint(body.getPosition(), 0.5f);
+            PVector3 field = tree.calculateFieldOnPoint(body.getPosition(), 0.5f);
             body.move(field);
             // std::cout << "field = " << field << std::endl;
         }
         tree.reset();
         std::cout << "Frame " << i << "..." << std::endl;
     }
+
+    std::cout << cag::PerfTimer::GetCallTreeString(cag::PerfTimer::GetCallTree()) << std::endl;
     
     return 0;
 }
