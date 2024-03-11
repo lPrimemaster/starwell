@@ -1,3 +1,4 @@
+#include <cmath>
 #include <fstream>
 
 #include "../include/draw.h"
@@ -168,11 +169,11 @@ void InstanceState::updatePositions(const std::vector<PVector3>* p)
     particleCount = p->size();
 }
 
-void InstanceState::updateColors(const std::vector<GLubyte>* c)
+void InstanceState::updateColors(const std::vector<UVector4>* c)
 {
     glBindBuffer(GL_ARRAY_BUFFER, color);
     glBufferData(GL_ARRAY_BUFFER, MAX_INSTANCE_PARTICLES * 4 * sizeof(GLubyte), nullptr, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, c->size() * sizeof(GLubyte), c->data());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, c->size() * 4 * sizeof(GLubyte), c->data());
 }
 
 void InstanceState::draw() const

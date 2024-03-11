@@ -1,8 +1,11 @@
 #pragma once
 #include <unordered_map>
 #include <vector>
+#include <iostream>
+#include <glad/gl.h>
 
-#include "rwindow.h"
+#include "math.h"
+// #include "rwindow.h"
 
 class GenShader
 {
@@ -73,7 +76,7 @@ public:
     ~InstanceState();
     
     void updatePositions(const std::vector<PVector3>* p);
-    void updateColors(const std::vector<GLubyte>* c);
+    void updateColors(const std::vector<UVector4>* c);
     void draw() const;
 
 private:

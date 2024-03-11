@@ -14,7 +14,7 @@ public:
     std::vector<Body>* getBodies(); // TODO: (César): Prefer a different approach
 
 private:
-    std::optional<std::pair<std::vector<PVector3>, std::vector<PVector3>>> parsePythonBodyPos(const pybind11::tuple& input);
+    std::optional<std::tuple<std::vector<PVector3>, std::vector<PVector3>, std::vector<UVector4>>> parsePythonBodyPos(const pybind11::tuple& input);
     void populateBodiesFromScript();
 
 private:

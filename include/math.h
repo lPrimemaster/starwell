@@ -93,4 +93,19 @@ PVector4 operator*(const PMatrix4& a, const PVector4& b);
 
 std::ostream& operator<<(std::ostream& cout, const PMatrix4& v);
 
+struct UVector4
+{
+    union
+    {
+        struct
+        {
+            unsigned char r;
+            unsigned char g;
+            unsigned char b;
+            unsigned char a;
+        };
+        unsigned char data[4];
+    };
+};
+
 float PRadians(float degrees);

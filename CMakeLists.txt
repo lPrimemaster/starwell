@@ -34,6 +34,7 @@ set(IMGUI_EXTRA_SOURCES
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
 )
 
 add_subdirectory(${glad_SOURCE_DIR}/cmake glad_cmake)
@@ -68,6 +69,12 @@ add_executable(starwell
     # Scenes
     include/scene.h
     src/scene.cpp
+
+    # GUI Windows
+    include/windows/window.h
+    src/windows/window.cpp
+    include/windows/settings.h
+    src/windows/settings.cpp
 
     src/main.cpp
     ${IMGUI_EXTRA_SOURCES}

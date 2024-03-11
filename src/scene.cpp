@@ -1,4 +1,5 @@
 #include "../include/scene.h"
+#include <cmath>
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
@@ -23,21 +24,22 @@ std::vector<Body>* PythonScene::getBodies()
     return &bodies;
 }
 
-std::optional<std::pair<std::vector<PVector3>, std::vector<PVector3>>> PythonScene::parsePythonBodyPos(const pybind11::tuple& input)
+std::optional<std::tuple<std::vector<PVector3>, std::vector<PVector3>, std::vector<UVector4>>> PythonScene::parsePythonBodyPos(const pybind11::tuple& input)
 {
-    if(input.size() != 2)
+    if(input.size() != 3)
     {
-        std::cerr << "Failed to parse python script : Must return a pair (positions, velocities)." << std::endl;
+        std::cerr << "Failed to parse python script : Must return a tuple (positions, velocities, colors)." << std::endl;
         return {};
     }
 
     auto pos = input[0];
     auto vel = input[1];
+    auto col = input[2];
     
     std::vector<PVector3> positions;
-    for(const auto& v : pos)
+    for(const auto& p : pos)
     {
-        auto it = v.begin();
+        auto it = p.begin();
         float x = it->cast<float>();
         float y = (++it)->cast<float>();
         float z = (++it)->cast<float>();
@@ -54,7 +56,18 @@ std::optional<std::pair<std::vector<PVector3>, std::vector<PVector3>>> PythonSce
         velocities.push_back({x, y, z});
     }
 
-    return std::make_pair(positions, velocities);
+    std::vector<UVector4> colors;
+    for(const auto& c : col)
+    {
+        auto it = c.begin();
+        unsigned char r = it->cast<unsigned char>();
+        unsigned char g = (++it)->cast<unsigned char>();
+        unsigned char b = (++it)->cast<unsigned char>();
+        unsigned char a = (++it)->cast<unsigned char>();
+        colors.push_back({r, g, b, a});
+    }
+
+    return std::make_tuple(positions, velocities, colors);
 }
 
 void PythonScene::populateBodiesFromScript()
@@ -66,11 +79,10 @@ void PythonScene::populateBodiesFromScript()
     auto nativeData = parsePythonBodyPos(data);
     if(nativeData)
     {
-        auto [positions, velocities] = *nativeData;
+        auto [positions, velocities, colors] = *nativeData;
         for(std::size_t i = 0; i < positions.size(); i++)
         {
-            bodies.push_back(Body(positions[i], velocities[i]));
+            bodies.push_back(Body(positions[i], velocities[i], colors[i]));
         }
     }
 }
-

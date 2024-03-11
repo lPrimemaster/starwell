@@ -1,32 +1,7 @@
 // This is a very simple attempt to start some simulation code using the Barnes-Hut algorithm for n-body interactions
 // It features a O(n log n) complexity
 
-#include <algorithm>
-#include <array>
-#include <complex>
-#include <concepts>
-#include <cstddef>
-#include <cstdlib>
-#include <fstream>
-#include <iterator>
-#include <math.h>
-#include <new>
-#include <numeric>
-#include <pybind11/cast.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
-#include <random>
-#include <string>
-#include <typeinfo>
-#include <utility>
-#include <vector>
-#include <cmath>
-#include <iostream>
-#include <regex>
-#include <typeinfo>
-
 #include <stperf.h>
-
 #include <config.h>
 
 #include "../include/math.h"
@@ -36,75 +11,6 @@
 #include "../include/rwindow.h"
 #include "../include/draw.h"
 #include "../include/scene.h"
-
-// template<typename T>
-// class LPool
-// {
-// public:
-//     LPool(std::size_t maxInstances) : N(maxInstances)
-//     {
-//         buffer = new unsigned char[sizeof(T) * N];
-//         state = new bool[N]{ false };
-//     }
-//
-//     ~LPool() { if(buffer) delete[] buffer; }
-//
-//     void* alloc()
-//     {
-//         for(std::size_t i = 0; i < N; i++)
-//         {
-//             if(!state[i])
-//             {
-//                 state[i] = true;
-//                 return &buffer[sizeof(T) * i];
-//             }
-//         }
-//         throw std::bad_alloc();
-//     }
-//
-//     void free(void* p)
-//     {
-//         for(std::size_t i = 0; i < N; i++)
-//         {
-//             if(&buffer[sizeof(T) * i] == p)
-//             {
-//                 state[i] = false;
-//                 return;
-//             }
-//         }
-//     }
-//
-// private:
-//     unsigned char* buffer = nullptr;
-//     bool* state = nullptr;
-//     const std::size_t N;
-// };
-
-static std::vector<GLubyte> ColorMapTest(const std::vector<Body>* velocities)
-{
-    std::vector<GLubyte> out;
-    out.reserve(4 * velocities->size());
-    
-    int i = velocities->size();
-    while(i--)
-    {   
-        if(i >= 1000)
-        {
-            out.push_back(255);
-            out.push_back(0);
-        }
-        else
-        {
-            out.push_back(0);
-            out.push_back(255);
-        }
-        
-        out.push_back(0);
-        out.push_back(255);
-    }
-
-    return out;
-}
 
 int main(void)
 {
@@ -135,32 +41,24 @@ int main(void)
     {
         while(rwindow.windowOpen())
         {
+            // Compute BHTree
             for(auto& body : *scene.getBodies())
             {
                 tree.insertBody(&body);
             }
             
+            // Render
             rwindow.clearBuffer();
-            pstate.updatePositions(Body::GetLinearPositionPool());
-            auto colorMap = ColorMapTest(scene.getBodies());
-            pstate.updateColors(&colorMap);
-            shader.load("MVP", camera.getMatrix());
-            pstate.draw();
-            static bool repopulate = false;
-            rwindow.render(camera, &repopulate);
+            rwindow.render(camera, pstate, scene, shader);
             rwindow.swapBuffers();
-
+            
+            // Calculate field from BHTree and displace bodies
             for(auto& body : *scene.getBodies())
             {
                 PVector3 field = tree.calculateFieldOnPoint(body.getPosition(), 0.5f);
                 body.move(field);
             }
             tree.reset();
-
-            if(repopulate)
-            {
-                scene.reload();
-            }
         }
     }
     return 0;
