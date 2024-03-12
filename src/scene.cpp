@@ -8,7 +8,7 @@
 // Unless we are planning on using python out of this class
 static pybind11::scoped_interpreter interp{};
 
-PythonScene::PythonScene(const std::string& name) : module(pybind11::module_::import(name.c_str()))
+PythonScene::PythonScene(const std::string& name) : name(name), module(pybind11::module_::import(name.c_str()))
 {
     reload();
 }

@@ -30,6 +30,11 @@ int main(void)
     Camera camera(PRadians(90.0f), (16.0f / 9.0f), Camera::Type::LOOKAT);
     camera.set({0.0f, -20.0f, -500.0f}, {0.0f, 0.0f, 0.0f});
     shader.load("sf", 5.0f);
+
+    // Scroll default behaviour
+    rwindow.registerScrollCallback([&camera](double yoff) -> void {
+        camera.translate(camera.getScrollSensitivity() * yoff * camera.getHeading());
+    });
     
     // Init BH tree
     BHTree tree;

@@ -1,8 +1,19 @@
 #include "../include/rwindow.h"
 #include "../include/windows/settings.h"
 #include "imgui.h"
+#include <GLFW/glfw3.h>
 
 // #include <memory>
+
+static void InternalScrollCalback(GLFWwindow* window, double xoff, double yoff)
+{
+    (void)xoff;
+    RenderWindow* rwindow = reinterpret_cast<RenderWindow*>(glfwGetWindowUserPointer(window));
+    if(rwindow)
+    {
+        rwindow->runScrollCallbacks(yoff);
+    }
+}
 
 RenderWindow::RenderWindow(const std::string& name, bool maximized)
     : glfwOK(false), window(nullptr), width(1920), height(1080)
@@ -48,6 +59,9 @@ RenderWindow::RenderWindow(const std::string& name, bool maximized)
     }
 
     registerWindows();
+
+    glfwSetWindowUserPointer(window, this);
+    glfwSetScrollCallback(window, InternalScrollCalback);
 }
 
 RenderWindow::~RenderWindow()
@@ -115,7 +129,29 @@ void RenderWindow::swapBuffers()
     glfwSwapBuffers(window);
 }
 
+int RenderWindow::registerScrollCallback(std::function<void(double)> func)
+{
+    scrollCallbacks.push_back(func);
+    return static_cast<int>(scrollCallbacks.size()) - 1;
+}
+
+void RenderWindow::removeScrollCallback(int id)
+{
+    if(id < static_cast<int>(scrollCallbacks.size()))
+    {
+        scrollCallbacks.erase(std::next(scrollCallbacks.begin(), id));
+    }
+}
+
+void RenderWindow::runScrollCallbacks(double yoff)
+{
+    for(auto& sfun : scrollCallbacks)
+    {
+        sfun(yoff);
+    }
+}
+
 void RenderWindow::registerWindows()
 {
-    windows.push_back(std::make_unique<SettingsWindow>());
+    windows.push_back(std::make_unique<SettingsWindow>(this));
 }

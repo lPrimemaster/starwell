@@ -18,6 +18,7 @@ private:
     void populateBodiesFromScript();
 
 private:
+    std::string name;
     pybind11::module_ module;
     std::vector<Body> bodies;
 };

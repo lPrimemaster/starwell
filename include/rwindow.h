@@ -5,6 +5,7 @@
 #include <backends/imgui_impl_opengl3.h>
 #include <glad/gl.h>
 #include <glfw3.h>
+#include <vector>
 
 #include "math.h"
 #include "camera.h"
@@ -27,6 +28,10 @@ public:
     void clearBuffer();
     void swapBuffers();
 
+    int registerScrollCallback(std::function<void(double)> func);
+    void removeScrollCallback(int id);
+    void runScrollCallbacks(double yoff);
+
 private:
     void registerWindows();
 
@@ -36,5 +41,6 @@ private:
     int width;
     int height;
     std::vector<std::unique_ptr<GenWindow>> windows;
+    std::vector<std::function<void(double)>> scrollCallbacks;
 };
 
